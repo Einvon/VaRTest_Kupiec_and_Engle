@@ -1,4 +1,4 @@
-# 必要库
+# 必要库 libs
 import numpy as np
 import pandas as pd
 from scipy.stats import chi2
@@ -25,7 +25,7 @@ class ExpectileReg:
     附言Other
     ----------------------------
     注意Att：输出打表; Print the certain output\n
-    注意Att：该检验默认了对VaR估计的一般范式，即收益率原始数据从后抽取一部分用于VaR估计样本，因此会自动按照VaR的长度识别样本内与样本外，不必人工区分。; No need for division \n
+    注意Att：该检验会自动按照VaR的长度识别样本内与样本外，不必人工区分（前VaR个长度的原始收益率为样本内，后VaR个长度的原始收益率为样本外）。 No need for artificial division \n
     """
 
     def __init__(self, yields:np.array, var:np.array, method:str = 'KupiecTUFF', theta:float = 0.05, lag:int = 1) -> any:
@@ -37,25 +37,26 @@ class ExpectileReg:
 
     # 样本内比较的Engle检验（DQ_IS：样本内DQ）
     def __engleis_test(self) -> any:
-        hit = np.ones(len(self.yields))
+        yields = self.yields[0:len(self.var)]
+        hit = np.ones(len(yields))
         var_level = 1 - self.var_level
-        hit[self.yields < self.var] = 1 - var_level
-        hit[self.yields > self.var] = 0 - var_level
-        hit_matrix = np.zeros((len(self.yields) - self.lag, self.lag))
-        yields = hit[self.lag:len(self.yields)]
+        hit[yields < self.var] = 1 - var_level
+        hit[yields > self.var] = 0 - var_level
+        hit_matrix = np.zeros((len(yields) - self.lag, self.lag))
+        yields_lag = hit[self.lag:len(yields)]
         ind = 1
         while ind <= self.lag:
-            hit_matrix[:, ind - 1] = hit[ind - 1:(len(self.yields) - self.lag + ind - 1)]
+            hit_matrix[:, ind - 1] = hit[ind - 1:(len(yields) - self.lag + ind - 1)]
             ind += 1
         x_ini = np.ones(len(hit_matrix))
-        x = np.column_stack((x_ini, hit_matrix, self.var[self.lag:len(self.yields)]))
+        x = np.column_stack((x_ini, hit_matrix, self.var[self.lag:len(yields)]))
         if np.linalg.det(np.dot(x.T,x)) == 0:
             raise ValueError(f'xTx：{np.shape(np.dot(x.T,x))}是奇异的。')
         # 计算xTx的逆
         xtx_inv = np.linalg.inv(np.dot(x.T,x))
         # 计算ols闭集系数
         ols_par = xtx_inv @ x.T
-        ols_par = ols_par @ yields
+        ols_par = ols_par @ yields_lag
         # 计算样本内DQ检验的统计量（DQ_IS）
         denominator = var_level * (1 - var_level)
         statistics = (ols_par.T @ x.T @ x @ ols_par) / denominator
@@ -156,12 +157,12 @@ class ExpectileReg:
 # 调用示范
 if __name__ == '__main__':
     # 生成原始收益率的测试数据 Yields for Test
-    yields_input = np.random.normal(0, 4, 1000)
+    yields_input = np.random.normal(0, 4, 2000)
     # 表示5%分位数的VaR覆盖水平 VaR coverage for Test
     var_temp = np.quantile(yields_input, 0.05)
-    # 生成VaR的测试数据 VaR for Test
-    var_input = np.repeat(var_temp, len(yields_input))
+    # 生成VaR的测试数据(前半部分作为样本内；后半部分作为样本外) VaR for Test（first half in sample; last half out of sample）
+    var_input = np.repeat(var_temp, 0.5 * len(yields_input))
     # 实例化 Initialization
-    reg_one = ExpectileReg(yields=yields_input, var=var_input, method='KupiecPF')
+    reg_one = ExpectileReg(yields=yields_input, var=var_input, method='KupiecTUFF')
     # 执行检验 Run
     reg_one.process()
